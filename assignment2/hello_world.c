@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/delay.h>
 #include <asm/paravirt.h>
 #include "sysmap.h"
 
@@ -69,6 +70,9 @@ void cleanup_module(void){
     printk(KERN_INFO "Goodbye world\n");
 
     unhook_read();
+
+    // Quick and dirty solution to prevent other CPUs from crashing due to running unloaded code
+    msleep(1000);
 
     return;
 }
