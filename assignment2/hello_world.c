@@ -33,14 +33,22 @@ void enable_ro(void)
 
 int (*asmlinkage old_read_func)(int fd, void* buf, size_t count);
 
+atomic_t active_read_calls = ATOMIC_INIT(0);
+
 int fake_read(int fd, void* buf, size_t count)
 {
+    int ret;
+    atomic_inc(&active_read_calls);
+
     if (count == 1337)
     {
 	printk(KERN_INFO "1337 read\n");
     }
 
-    return old_read_func(fd, buf, count);
+    ret = old_read_func(fd, buf, count);
+
+    atomic_dec(&active_read_calls);
+    return ret;
 }
 
 void hook_read(void)
@@ -71,8 +79,10 @@ void cleanup_module(void){
 
     unhook_read();
 
-    // Quick and dirty solution to prevent other CPUs from crashing due to running unloaded code
-    msleep(1000);
+    // Prevent other CPUs from crashing due to running unloaded code
+    // Not too pretty but should be fine
+    while (atomic_read(&active_read_calls) != 0)
+	msleep(100);
 
     return;
 }
