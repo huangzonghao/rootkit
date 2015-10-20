@@ -17,7 +17,7 @@
 void print_nr_procs(void){
     struct task_struct *task_list;
     int process_counter = 0;
-    for_each_process(task_list){
+    for_each_process(task_list) {
         ++process_counter;
     }
     printk(KERN_INFO "The number of process : %d\n", process_counter);
