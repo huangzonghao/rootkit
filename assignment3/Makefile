@@ -1,4 +1,4 @@
-obj-m += hook_read_n_reboot.o
+obj-m += process_hiding.o
 
 all: sysmap.h
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

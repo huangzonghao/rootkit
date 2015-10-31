@@ -1,15 +1,12 @@
 /*
+ *  Assignment 2
+ *  System Call Hooking
+ *
  *  Requirements:
- *      a) Use printk to perform any output. This output should use the KERN_INFO
- *          log level.
- *      b) Your module should output welcome and goodbye messages when mod.ko is
- *          loaded and unloaded, respectively.
- *      c) Your module should contain a function print_nr_procs(). This function
- *          should out- put the number of processes in the system. Use the
- *          for_each_process macro (sched.h) to get the number of processes.
- *      d) After the welcome message,this module should call print_nr_procs()
- *          when loaded.
+ *     a) hook the read system call
+ *     b) reboot the machine if certain keystroke is detected by the kernel
  */
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -48,19 +45,19 @@ asmlinkage int fake_read(int fd, void* buf, size_t count)
     {
         if (strstr(buf, "doreboot"))
         {
-	    ((int (*)(char*))SM_kernel_restart)(NULL);
+            ((int (*)(char*))SM_kernel_restart)(NULL);
         }
         else
         {
-	    printk(KERN_INFO);
-	    mybuf[1] = '\0';
-	    for (i = 0; i < ret; i++)
-	    {
-		mybuf[0] = ((char*)buf)[i];
-		if ((mybuf[0] < ' ') || (mybuf[0] > '~')) continue;
-		printk(mybuf);
-	    }
-	    printk("\n");
+            printk(KERN_INFO);
+            mybuf[1] = '\0';
+            for (i = 0; i < ret; i++)
+            {
+                mybuf[0] = ((char*)buf)[i];
+                if ((mybuf[0] < ' ') || (mybuf[0] > '~')) continue;
+                printk(mybuf);
+            }
+            printk("\n");
         }
     }
 
@@ -84,7 +81,7 @@ void unhook_read(void)
 }
 
 int init_module(void){
-    printk(KERN_INFO "Hello world\n");
+    printk(KERN_INFO "Kernel module hook_read_n_reboot loaded.\n");
 
     hook_read();
 
@@ -92,14 +89,14 @@ int init_module(void){
 }
 
 void cleanup_module(void){
-    printk(KERN_INFO "Goodbye world\n");
+    printk(KERN_INFO "Kernel module hook_read_n_reboot unloaded.\n");
 
     unhook_read();
 
     // Prevent other CPUs from crashing due to running unloaded code
     // Not too pretty but should be fine
     while (atomic_read(&active_read_calls) != 0)
-	msleep(100);
+        msleep(100);
 
     return;
 }
