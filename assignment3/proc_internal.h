@@ -29,44 +29,44 @@ struct mempolicy;
  * subdir_node is used to build the rb tree "subdir" of the parent.
  */
 struct proc_dir_entry {
-	unsigned int low_ino;
-	umode_t mode;
-	nlink_t nlink;
-	kuid_t uid;
-	kgid_t gid;
-	loff_t size;
-	const struct inode_operations *proc_iops;
-	const struct file_operations *proc_fops;
-	struct proc_dir_entry *parent;
-	struct rb_root subdir;
-	struct rb_node subdir_node;
-	void *data;
-	atomic_t count;		/* use count */
-	atomic_t in_use;	/* number of callers into module in progress; */
-			/* negative -> it's going away RSN */
-	struct completion *pde_unload_completion;
-	struct list_head pde_openers;	/* who did ->open, but not ->release */
-	spinlock_t pde_unload_lock; /* proc_fops checks and pde_users bumps */
-	u8 namelen;
-	char name[];
+    unsigned int low_ino;
+    umode_t mode;
+    nlink_t nlink;
+    kuid_t uid;
+    kgid_t gid;
+    loff_t size;
+    const struct inode_operations *proc_iops;
+    const struct file_operations *proc_fops;
+    struct proc_dir_entry *parent;
+    struct rb_root subdir;
+    struct rb_node subdir_node;
+    void *data;
+    atomic_t count;     /* use count */
+    atomic_t in_use;    /* number of callers into module in progress; */
+    /* negative -> it's going away RSN */
+    struct completion *pde_unload_completion;
+    struct list_head pde_openers;   /* who did ->open, but not ->release */
+    spinlock_t pde_unload_lock; /* proc_fops checks and pde_users bumps */
+    u8 namelen;
+    char name[];
 };
 
 union proc_op {
-	int (*proc_get_link)(struct dentry *, struct path *);
-	int (*proc_show)(struct seq_file *m,
-		struct pid_namespace *ns, struct pid *pid,
-		struct task_struct *task);
+    int (*proc_get_link)(struct dentry *, struct path *);
+    int (*proc_show)(struct seq_file *m,
+            struct pid_namespace *ns, struct pid *pid,
+            struct task_struct *task);
 };
 
 struct proc_inode {
-	struct pid *pid;
-	int fd;
-	union proc_op op;
-	struct proc_dir_entry *pde;
-	struct ctl_table_header *sysctl;
-	struct ctl_table *sysctl_entry;
-	const struct proc_ns_operations *ns_ops;
-	struct inode vfs_inode;
+    struct pid *pid;
+    int fd;
+    union proc_op op;
+    struct proc_dir_entry *pde;
+    struct ctl_table_header *sysctl;
+    struct ctl_table *sysctl_entry;
+    const struct proc_ns_operations *ns_ops;
+    struct inode vfs_inode;
 };
 
 /*
@@ -74,64 +74,64 @@ struct proc_inode {
  */
 static inline struct proc_inode *PROC_I(const struct inode *inode)
 {
-	return container_of(inode, struct proc_inode, vfs_inode);
+    return container_of(inode, struct proc_inode, vfs_inode);
 }
 
 static inline struct proc_dir_entry *PDE(const struct inode *inode)
 {
-	return PROC_I(inode)->pde;
+    return PROC_I(inode)->pde;
 }
 
 static inline void *__PDE_DATA(const struct inode *inode)
 {
-	return PDE(inode)->data;
+    return PDE(inode)->data;
 }
 
 static inline struct pid *proc_pid(struct inode *inode)
 {
-	return PROC_I(inode)->pid;
+    return PROC_I(inode)->pid;
 }
 
 static inline struct task_struct *get_proc_task(struct inode *inode)
 {
-	return get_pid_task(proc_pid(inode), PIDTYPE_PID);
+    return get_pid_task(proc_pid(inode), PIDTYPE_PID);
 }
 
 static inline int task_dumpable(struct task_struct *task)
 {
-	int dumpable = 0;
-	struct mm_struct *mm;
+    int dumpable = 0;
+    struct mm_struct *mm;
 
-	task_lock(task);
-	mm = task->mm;
-	if (mm)
-		dumpable = get_dumpable(mm);
-	task_unlock(task);
-	if (dumpable == SUID_DUMP_USER)
-		return 1;
-	return 0;
+    task_lock(task);
+    mm = task->mm;
+    if (mm)
+        dumpable = get_dumpable(mm);
+    task_unlock(task);
+    if (dumpable == SUID_DUMP_USER)
+        return 1;
+    return 0;
 }
 
 static inline unsigned name_to_int(const struct qstr *qstr)
 {
-	const char *name = qstr->name;
-	int len = qstr->len;
-	unsigned n = 0;
+    const char *name = qstr->name;
+    int len = qstr->len;
+    unsigned n = 0;
 
-	if (len > 1 && *name == '0')
-		goto out;
-	while (len-- > 0) {
-		unsigned c = *name++ - '0';
-		if (c > 9)
-			goto out;
-		if (n >= (~0U-9)/10)
-			goto out;
-		n *= 10;
-		n += c;
-	}
-	return n;
+    if (len > 1 && *name == '0')
+        goto out;
+    while (len-- > 0) {
+        unsigned c = *name++ - '0';
+        if (c > 9)
+            goto out;
+        if (n >= (~0U-9)/10)
+            goto out;
+        n *= 10;
+        n += c;
+    }
+    return n;
 out:
-	return ~0U;
+    return ~0U;
 }
 
 /*
@@ -148,13 +148,13 @@ out:
 extern const struct file_operations proc_tid_children_operations;
 
 extern int proc_tid_stat(struct seq_file *, struct pid_namespace *,
-			 struct pid *, struct task_struct *);
+        struct pid *, struct task_struct *);
 extern int proc_tgid_stat(struct seq_file *, struct pid_namespace *,
-			  struct pid *, struct task_struct *);
+        struct pid *, struct task_struct *);
 extern int proc_pid_status(struct seq_file *, struct pid_namespace *,
-			   struct pid *, struct task_struct *);
+        struct pid *, struct task_struct *);
 extern int proc_pid_statm(struct seq_file *, struct pid_namespace *,
-			  struct pid *, struct task_struct *);
+        struct pid *, struct task_struct *);
 
 /*
  * base.c
@@ -171,29 +171,29 @@ extern loff_t mem_lseek(struct file *, loff_t, int);
 
 /* Lookups */
 typedef int instantiate_t(struct inode *, struct dentry *,
-				     struct task_struct *, const void *);
+        struct task_struct *, const void *);
 extern bool proc_fill_cache(struct file *, struct dir_context *, const char *, int,
-			   instantiate_t, struct task_struct *, const void *);
+        instantiate_t, struct task_struct *, const void *);
 
 /*
  * generic.c
  */
 extern struct dentry *proc_lookup(struct inode *, struct dentry *, unsigned int);
 extern struct dentry *proc_lookup_de(struct proc_dir_entry *, struct inode *,
-				     struct dentry *);
+        struct dentry *);
 extern int proc_readdir(struct file *, struct dir_context *);
 extern int proc_readdir_de(struct proc_dir_entry *, struct file *, struct dir_context *);
 
 static inline struct proc_dir_entry *pde_get(struct proc_dir_entry *pde)
 {
-	atomic_inc(&pde->count);
-	return pde;
+    atomic_inc(&pde->count);
+    return pde;
 }
 extern void pde_put(struct proc_dir_entry *);
 
 static inline bool is_empty_pde(const struct proc_dir_entry *pde)
 {
-	return S_ISDIR(pde->mode) && !pde->proc_iops;
+    return S_ISDIR(pde->mode) && !pde->proc_iops;
 }
 struct proc_dir_entry *proc_create_mount_point(const char *name);
 
@@ -201,10 +201,10 @@ struct proc_dir_entry *proc_create_mount_point(const char *name);
  * inode.c
  */
 struct pde_opener {
-	struct file *file;
-	struct list_head lh;
-	int closing;
-	struct completion *c;
+    struct file *file;
+    struct list_head lh;
+    int closing;
+    struct completion *c;
 };
 extern const struct inode_operations proc_link_inode_operations;
 
@@ -276,14 +276,14 @@ extern int proc_remount(struct super_block *, int *, char *);
  * task_[no]mmu.c
  */
 struct proc_maps_private {
-	struct inode *inode;
-	struct task_struct *task;
-	struct mm_struct *mm;
+    struct inode *inode;
+    struct task_struct *task;
+    struct mm_struct *mm;
 #ifdef CONFIG_MMU
-	struct vm_area_struct *tail_vma;
+    struct vm_area_struct *tail_vma;
 #endif
 #ifdef CONFIG_NUMA
-	struct mempolicy *task_mempolicy;
+    struct mempolicy *task_mempolicy;
 #endif
 };
 
@@ -300,6 +300,6 @@ extern const struct file_operations proc_pagemap_operations;
 
 extern unsigned long task_vsize(struct mm_struct *);
 extern unsigned long task_statm(struct mm_struct *,
-				unsigned long *, unsigned long *,
-				unsigned long *, unsigned long *);
+        unsigned long *, unsigned long *,
+        unsigned long *, unsigned long *);
 extern void task_mem(struct seq_file *, struct mm_struct *);

