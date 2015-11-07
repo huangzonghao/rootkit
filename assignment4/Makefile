@@ -1,5 +1,4 @@
-o
-bj-m += file_hiding.o
+obj-m += file_hiding.o
 
 all: sysmap.h
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

