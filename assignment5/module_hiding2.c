@@ -13,7 +13,9 @@
 #include <linux/delay.h>
 #include <linux/list.h>
 #include <linux/kobject.h>
+#include <linux/sched.h>
 #include <asm/paravirt.h>
+#include "sysmap.h"
 
 #define STATE_MODULES_VISIBLE 0
 #define STATE_MODULES_HIDDEN 1
