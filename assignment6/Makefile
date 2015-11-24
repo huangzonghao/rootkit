@@ -1,4 +1,4 @@
-obj-m += socket_hiding.o
+obj-m += inet_diag.o
 
 all: sysmap.h
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
