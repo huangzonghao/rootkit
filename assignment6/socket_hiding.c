@@ -166,36 +166,36 @@ int fake_udp6_seq_show(struct seq_file *seq, void *v)
 
 struct proc_dir_entry* get_pde_subdir(struct proc_dir_entry* pde, const char* name)
 {
-        struct rb_root *root = &pde->subdir;
-        struct rb_node **new = &root->rb_node, *parent = NULL;
+    struct rb_root *root = &pde->subdir;
+    struct rb_node **new = &root->rb_node, *parent = NULL;
 
-        /* Figure out where to put new node */
-        while (*new) {
-                struct proc_dir_entry *this =
-                        container_of(*new, struct proc_dir_entry, subdir_node);
-                int result; // proc_match(de->namelen, de->name, this);
-if (strlen(name) < this->namelen) result = -1;
-else if (strlen(name) > this->namelen) result = 1;
-else result = memcmp(name, this->name, this->namelen);
+    /* Figure out where to put new node */
+    while (*new) {
+        struct proc_dir_entry *this =
+            container_of(*new, struct proc_dir_entry, subdir_node);
+        int result; // proc_match(de->namelen, de->name, this);
+        if (strlen(name) < this->namelen) result = -1;
+        else if (strlen(name) > this->namelen) result = 1;
+        else result = memcmp(name, this->name, this->namelen);
 
-                parent = *new;
-                if (result < 0)
-                        new = &(*new)->rb_left;
-                else if (result > 0)
-                        new = &(*new)->rb_right;
-                else
-                        return this;
-        }
-
-printk(KERN_INFO "thing not found BUGBUGBUG\n");
-return NULL;
-/*
-
-    struct proc_dir_entry* ret = rb_entry(pde->subdir.rb_node, struct proc_dir_entry, subdir_node);
-    while(ret && strcmp(name, ret->name)) {
-        ret = ret->next;
+        parent = *new;
+        if (result < 0)
+            new = &(*new)->rb_left;
+        else if (result > 0)
+            new = &(*new)->rb_right;
+        else
+            return this;
     }
-    return ret;*/
+
+    printk(KERN_INFO "thing not found BUGBUGBUG\n");
+    return NULL;
+    /*
+
+       struct proc_dir_entry* ret = rb_entry(pde->subdir.rb_node, struct proc_dir_entry, subdir_node);
+       while(ret && strcmp(name, ret->name)) {
+       ret = ret->next;
+       }
+       return ret;*/
 }
 
 static int init_procstuff(void){
