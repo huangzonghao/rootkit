@@ -23,6 +23,7 @@
 
 #include <asm/paravirt.h>
 #include <asm/cacheflush.h>
+#include <asm-generic/uaccess.h>
 
 #include "sysmap.h"
 #include "proc_internal.h"
