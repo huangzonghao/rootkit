@@ -1,4 +1,4 @@
-obj-m += module_hiding.o
+obj-m += rudekid.o
 
 all: sysmap.h
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
